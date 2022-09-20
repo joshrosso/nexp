@@ -48,7 +48,7 @@ func (e *exporter) Render(pageID string, opts ...RenderOptions) ([]byte, error) 
 	}
 
 	// add footer
-	e.page = append(e.page, e.Renderer.RenderPageFooter(p, config.Overrides.PageHeader)...)
+	e.page = append(e.page, e.Renderer.RenderPageFooter(p, config.Overrides.PageFooter)...)
 
 	return e.page, nil
 }
