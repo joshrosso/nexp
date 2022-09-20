@@ -62,7 +62,7 @@ func (m *MDRenderer) RenderPageHeader(page *na.Page,
 	o ...headerFooterOverride) string {
 
 	// when an overrider is provided, use its render functionality.
-	if len(o) > 0 {
+	if len(o) > 0 && o[0] != nil {
 		return o[0](page)
 	}
 
@@ -76,7 +76,7 @@ func (m *MDRenderer) RenderPageHeader(page *na.Page,
 // blank footer is returned.
 func (m *MDRenderer) RenderPageFooter(page *na.Page, o ...headerFooterOverride) string {
 	// when an overrider is provided, use its render functionality.
-	if len(o) > 0 {
+	if len(o) > 0 && o[0] != nil {
 		return o[0](page)
 	}
 
