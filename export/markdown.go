@@ -1,6 +1,7 @@
 package export
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,7 +29,7 @@ const (
 	mdNumItemPattern       = "1. %s"
 	mdTodoUncheckedPattern = "* [] %s"
 	mdTodoCheckedPattern   = "* [x] %s"
-	mdImagePattern         = "![%s](%s)"
+	MdImagePattern         = "![%s](%s)"
 	mdTableElementPattern  = "| %s "
 	mdDividerPattern       = "---"
 	mdQuotePattern         = "> %s"
@@ -65,16 +66,7 @@ func (m *MDRenderer) RenderPageHeader(page *na.Page,
 		return o[0](page)
 	}
 
-	// loops through properties attached to the page to find the property of
-	// type title (there can only be one). This is then used as the title for
-	// the document.
-	var title *na.TitleProperty
-	for _, v := range page.Properties {
-		if v.GetType() == "title" {
-			title = v.(*na.TitleProperty)
-		}
-	}
-	output := fmt.Sprintf(mdHeadingOnePattern, m.RenderText(title.Title))
+	output := fmt.Sprintf(mdHeadingOnePattern, ResolveTitleInPage(page))
 
 	return output
 }
@@ -242,10 +234,10 @@ func (m *MDRenderer) RenderQuote(b *Block, o ...blockOverride) string {
 	return fmt.Sprintf(mdQuotePattern, b.Text)
 }
 
-func (m *MDRenderer) RenderImage(b *Block, o ...blockOverride) (string, error) {
+func (m *MDRenderer) RenderImage(b *Block, o ...imageOverride) (string, error) {
 	// when an override function is passed, call it and return its output
 	if len(o) > 0 && o[0] != nil {
-		return o[0](b), nil
+		return o[0](b)
 	}
 
 	if b.BlockRef.GetType() != "image" {
@@ -260,7 +252,7 @@ func (m *MDRenderer) RenderImage(b *Block, o ...blockOverride) (string, error) {
 	if ib.Image.External != nil {
 		// TODO(joshrosso): Friendly name is currently "image". Should think
 		// about how to make this more eloquent.
-		return fmt.Sprintf(mdImagePattern, "image", ib.Image.External.URL), nil
+		return fmt.Sprintf(MdImagePattern, "image", ib.Image.External.URL), nil
 	}
 	// image was uploaded to Notion, need to download to local
 	// filesystem.
@@ -273,7 +265,7 @@ func (m *MDRenderer) RenderImage(b *Block, o ...blockOverride) (string, error) {
 		}
 	}
 
-	return fmt.Sprintf(mdImagePattern, "image", filePath), nil
+	return fmt.Sprintf(MdImagePattern, "image", filePath), nil
 }
 
 func (m *MDRenderer) RenderCode(b *Block, o ...blockOverride) string {
@@ -371,6 +363,16 @@ func ResolveLanguageForCodeBlock(language string) string {
 	return language
 }
 
+func createPathIfNonExistent(path string) error {
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		err := os.MkdirAll(path, os.ModePerm)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // SaveNotionImageToFilesystem takes the URL of a Notion-hosted image. The URL
 // is typically an S3 address. ImageSaveOptions can be optinally provided. If
 // multiple options are provided, only the first is respected. By default the
@@ -382,6 +384,7 @@ func SaveNotionImageToFilesystem(address string,
 
 	// establish config for image save from options
 	config := ResolveImageSaveOptions(opts...)
+	createPathIfNonExistent(config.SavePath)
 
 	// determine name of image using UUID created by notion
 	u, err := url.Parse(address)

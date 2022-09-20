@@ -122,7 +122,7 @@ type Renderer interface {
 	// Notion) and internal images (hosted within Notion). For internal images,
 	// a Renderer implementation should be able to download and save the image
 	// to the local filesystem.
-	RenderImage(*Block, ...blockOverride) (string, error)
+	RenderImage(*Block, ...imageOverride) (string, error)
 
 	// RenderTableRow receives a list of cells that contain text that has been
 	// run through ParseText and metadata around the table the row belongs to.
@@ -166,6 +166,9 @@ type Block struct {
 	BlockRef na.Block
 	Opts     []RenderOptions
 	Depth    int
+	// Reference to the page in case retrieving metadata (properties) are
+	// useful for rending behavior.
+	PageRef *na.Page
 }
 
 type ExporterOptions struct {

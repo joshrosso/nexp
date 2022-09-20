@@ -30,6 +30,8 @@ const (
 // and error is returned.
 func (e *exporter) Render(pageID string, opts ...RenderOptions) ([]byte, error) {
 
+	config := resolveRenderConfig(opts...)
+
 	e.page = []byte{}
 
 	p, err := e.c.Page.Get(context.Background(), na.PageID(pageID))
@@ -37,7 +39,7 @@ func (e *exporter) Render(pageID string, opts ...RenderOptions) ([]byte, error) 
 		return e.page, fmt.Errorf("Failed getting Notion page (%s), "+
 			"error from client: %s", pageID, err)
 	}
-	e.page = append(e.page, e.Renderer.RenderPageHeader(p)...)
+	e.page = append(e.page, e.Renderer.RenderPageHeader(p, config.Overrides.PageHeader)...)
 
 	e.page, err = e.renderBlocks(pageID, opts...)
 	if err != nil {
@@ -46,7 +48,7 @@ func (e *exporter) Render(pageID string, opts ...RenderOptions) ([]byte, error) 
 	}
 
 	// add footer
-	e.page = append(e.page, e.Renderer.RenderPageFooter(p)...)
+	e.page = append(e.page, e.Renderer.RenderPageFooter(p, config.Overrides.PageHeader)...)
 
 	return e.page, nil
 }
@@ -77,10 +79,10 @@ func NewRenderer(kind string) (Renderer, error) {
 // NewExporter returns an exporter instance with an underlying Notion API
 // client attached. The exporter instance is used to call Render functionality.
 func NewExporter(opts ...ExporterOptions) (*exporter, error) {
-	var err error
+	// set up default render. Will be overwritten if provided in options.
+	r, err := NewRenderer(defaultFormat)
 	var token string
 	var notionClientOpts na.ClientOption
-	var r Renderer
 
 	// TODO(joshrosso): Clean this up into a dedicated options resolver func
 	if len(opts) > 0 {
@@ -119,6 +121,26 @@ func NewExporter(opts ...ExporterOptions) (*exporter, error) {
 	return &exporter{c: na.NewClient(na.Token(token), notionClientOpts), Renderer: r}, nil
 }
 
+// ResolveTitleInPage takes a Notion page object and loops through its
+// properties to find the property which is a title Type. It then returns the
+// plain text representation of that property.
+func ResolveTitleInPage(p *na.Page) string {
+	// loops through properties attached to the page to find the property of
+	// type title (there can only be one). This is then used as the title for
+	// the document.
+	var title *na.TitleProperty
+	for _, v := range p.Properties {
+		if v.GetType() == "title" {
+			title = v.(*na.TitleProperty)
+		}
+	}
+	if len(title.Title) < 1 {
+		return ""
+	}
+	return title.Title[0].PlainText
+
+}
+
 // renderBlocks retrieves the blocks that compose a page. It iterates over
 // every block retrieved calling appropriate render functionality. As blocks
 // are rendered into their string representation, they are appended to the
@@ -128,6 +150,13 @@ func NewExporter(opts ...ExporterOptions) (*exporter, error) {
 // appropriate block render(s). An error is returned if there are issues with
 // client access to page, blocks, or other objects.
 func (e *exporter) renderBlocks(pageID string, opts ...RenderOptions) ([]byte, error) {
+	// Retrieve page object to pass to renderer in case render behavior depends
+	// on looking up metadata about the page.
+	page, err := e.c.Page.Get(context.Background(), na.PageID(pageID))
+	if err != nil {
+		return e.page, fmt.Errorf("failed to retrieve page from Notion. "+
+			"Error: %s.", err)
+	}
 
 	config := resolveRenderConfig(opts...)
 
@@ -146,19 +175,19 @@ func (e *exporter) renderBlocks(pageID string, opts ...RenderOptions) ([]byte, e
 			in := b.(*na.Heading1Block)
 			txt := e.Renderer.RenderText(in.Heading1.RichText)
 
-			rend = e.Renderer.RenderPageHeader1(&Block{txt, in, opts, config.depth},
+			rend = e.Renderer.RenderPageHeader1(&Block{txt, in, opts, config.depth, page},
 				config.Overrides.Header1)
 
 		case "heading_2":
 			in := b.(*na.Heading2Block)
 			txt := e.Renderer.RenderText(in.Heading2.RichText)
-			rend = e.Renderer.RenderPageHeader2(&Block{txt, in, opts, config.depth},
+			rend = e.Renderer.RenderPageHeader2(&Block{txt, in, opts, config.depth, page},
 				config.Overrides.Header2)
 
 		case "heading_3":
 			in := b.(*na.Heading3Block)
 			txt := e.Renderer.RenderText(in.Heading3.RichText)
-			rend = e.Renderer.RenderPageHeader3(&Block{txt, in, opts, config.depth},
+			rend = e.Renderer.RenderPageHeader3(&Block{txt, in, opts, config.depth, page},
 				config.Overrides.Header3)
 
 		case "paragraph":
@@ -170,25 +199,25 @@ func (e *exporter) renderBlocks(pageID string, opts ...RenderOptions) ([]byte, e
 				continue
 			}
 			txt := e.Renderer.RenderText(in.Paragraph.RichText)
-			rend = e.Renderer.RenderParagraph(&Block{txt, in, opts, config.depth},
+			rend = e.Renderer.RenderParagraph(&Block{txt, in, opts, config.depth, page},
 				config.Overrides.Paragraph)
 
 		case "bulleted_list_item":
 			in := b.(*na.BulletedListItemBlock)
 			txt := e.Renderer.RenderText(in.BulletedListItem.RichText)
-			rend = e.Renderer.RenderBulletedList(&Block{txt, in, opts, config.depth},
+			rend = e.Renderer.RenderBulletedList(&Block{txt, in, opts, config.depth, page},
 				config.Overrides.BulletedList)
 
 		case "numbered_list_item":
 			in := b.(*na.NumberedListItemBlock)
 			txt := e.Renderer.RenderText(in.NumberedListItem.RichText)
-			rend = e.Renderer.RenderNumberedList(&Block{txt, in, opts, config.depth},
+			rend = e.Renderer.RenderNumberedList(&Block{txt, in, opts, config.depth, page},
 				config.Overrides.NumberedList)
 
 		case "to_do":
 			in := b.(*na.ToDoBlock)
 			txt := e.Renderer.RenderText(in.ToDo.RichText)
-			rend = e.Renderer.RenderTodoList(&Block{txt, in, opts, config.depth},
+			rend = e.Renderer.RenderTodoList(&Block{txt, in, opts, config.depth, page},
 				config.Overrides.Todo)
 
 		case "divider":
@@ -199,7 +228,7 @@ func (e *exporter) renderBlocks(pageID string, opts ...RenderOptions) ([]byte, e
 		case "code":
 			in := b.(*na.CodeBlock)
 			txt := e.Renderer.RenderText(in.Code.RichText)
-			rend = e.Renderer.RenderCode(&Block{txt, in, opts, config.depth},
+			rend = e.Renderer.RenderCode(&Block{txt, in, opts, config.depth, page},
 				config.Overrides.Code)
 
 		// new table detected. setup table state to support rendering
@@ -243,13 +272,13 @@ func (e *exporter) renderBlocks(pageID string, opts ...RenderOptions) ([]byte, e
 		case "quote":
 			in := b.(*na.QuoteBlock)
 			txt := e.Renderer.RenderText(in.Quote.RichText)
-			rend = e.Renderer.RenderQuote(&Block{txt, in, opts, config.depth},
+			rend = e.Renderer.RenderQuote(&Block{txt, in, opts, config.depth, page},
 				config.Overrides.Quote)
 
 		case "callout":
 			in := b.(*na.CalloutBlock)
 			txt := e.Renderer.RenderText(in.Callout.RichText)
-			rend = e.Renderer.RenderCallout(&Block{txt, in, opts, config.depth},
+			rend = e.Renderer.RenderCallout(&Block{txt, in, opts, config.depth, page},
 				config.Overrides.Callout)
 
 		case "image":
@@ -259,7 +288,7 @@ func (e *exporter) renderBlocks(pageID string, opts ...RenderOptions) ([]byte, e
 				continue
 			}
 			in := b.(*na.ImageBlock)
-			rend, err = e.Renderer.RenderImage(&Block{BlockRef: in, Opts: opts},
+			rend, err = e.Renderer.RenderImage(&Block{BlockRef: in, Opts: opts, PageRef: page},
 				config.Overrides.Image)
 			if err != nil {
 				return e.page, err

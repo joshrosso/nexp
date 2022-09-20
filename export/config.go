@@ -30,6 +30,8 @@ type RenderOptions struct {
 // to OverrideOptions.Paragraph, the instructions defined in that override will
 // execute instead for every Paragraph Block.
 type OverrideOptions struct {
+	PageHeader   headerFooterOverride
+	PageFooter   headerFooterOverride
 	Header1      blockOverride
 	Header2      blockOverride
 	Header3      blockOverride
@@ -41,7 +43,7 @@ type OverrideOptions struct {
 	Todo         blockOverride
 	Quote        blockOverride
 	Callout      blockOverride
-	Image        blockOverride
+	Image        imageOverride
 	Padding      blockOverride
 	Row          rowOverride
 }
@@ -90,6 +92,11 @@ type headerFooterOverride func(*na.Page) string
 // Block object. This is an interface that, using GetType(), you can cast into
 // the approriate type and access its fields.
 type blockOverride func(*Block) string
+
+// imageOverride is the same as blockOverride except it allows for returning an
+// error. This is to support instances where image download can report a
+// failure and fail the render job.
+type imageOverride func(*Block) (string, error)
 
 // rowOverride enables custom rendering for all table rows in Notion Blocks.
 //
