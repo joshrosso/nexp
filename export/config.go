@@ -19,6 +19,7 @@ type RenderOptions struct {
 	tableState          tableState
 	previousElementType string
 	depth               int
+	originalPageRef     *na.Page
 }
 
 // OverrideOptions contains optional function definitions that can override the
