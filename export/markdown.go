@@ -36,9 +36,15 @@ const (
 
 	defaultImageSaveLocation = "images"
 	notionImageExtension     = ".png"
+
+	ulquo = "“"
+	urquo = "”"
 )
 
-var languages map[string]string
+var (
+	languages            map[string]string
+	unicodeQuoteReplacer = strings.NewReplacer(ulquo, "\"", urquo, "\"")
+)
 
 func init() {
 	// list of language names which need to be swapped from the Notion
@@ -322,6 +328,8 @@ func (m *MDRenderer) RenderText(rt []na.RichText, o ...richTextOverride) string 
 			parsed += fmt.Sprintf(t.Text.Content)
 		}
 	}
+	// Notoin uses smart quotes by default, replace them with normal quotes.
+	parsed = unicodeQuoteReplacer.Replace(parsed)
 
 	return parsed
 }

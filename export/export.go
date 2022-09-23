@@ -41,7 +41,7 @@ func (e *exporter) Render(pageID string, opts ...RenderOptions) ([]byte, error) 
 	}
 	e.page = append(e.page, e.Renderer.RenderPageHeader(p, config.Overrides.PageHeader)...)
 
-	e.page, err = e.renderBlocks(pageID, opts...)
+	e.page, err = e.renderFullPage(pageID, "", opts...)
 	if err != nil {
 		return e.page, fmt.Errorf("Failed rendering Notion page, error: %s",
 			err)
@@ -60,7 +60,7 @@ func (e *exporter) RenderAppend(pageID string, opts ...RenderOptions) ([]byte, e
 
 	// before appending, add separation
 	e.page = append(e.page, "\n\n"...)
-	return e.renderBlocks(pageID, opts...)
+	return e.renderFullPage(pageID, "", opts...)
 }
 
 // NewRenderer returns a renderer based on the kind (export format) provided.
@@ -149,29 +149,12 @@ func ResolveTitleInPage(p *na.Page) string {
 // in OverrideOptions, those are passed and will be respected for the
 // appropriate block render(s). An error is returned if there are issues with
 // client access to page, blocks, or other objects.
-func (e *exporter) renderBlocks(pageID string, opts ...RenderOptions) ([]byte, error) {
+func (e *exporter) renderBlocks(pageID string, blocks *na.GetChildrenResponse, opts ...RenderOptions) ([]byte, error) {
 	config := resolveRenderConfig(opts...)
-
-	if config.originalPageRef == nil {
-		// Retrieve page object to pass to renderer in case render behavior depends
-		// on looking up metadata about the page.
-		page, err := e.c.Page.Get(context.Background(), na.PageID(pageID))
-		if err != nil {
-			return e.page, fmt.Errorf("failed to retrieve page from Notion. "+
-				"Error: %s.", err)
-		}
-		config.originalPageRef = page
-	}
-
-	blocks, err := e.c.Block.GetChildren(context.Background(),
-		na.BlockID(pageID), &na.Pagination{})
-	if err != nil {
-		return e.page, fmt.Errorf("failed to retrieve data from Notion. "+
-			"Error: %s.", err)
-	}
 
 	for _, b := range blocks.Results {
 		var rend string
+		var err error
 		switch b.GetType() {
 
 		case "heading_1":
@@ -307,7 +290,6 @@ func (e *exporter) renderBlocks(pageID string, opts ...RenderOptions) ([]byte, e
 
 		e.page = append(e.page, rend...)
 		config.previousElementType = string(b.GetType())
-
 		// When a child exists, recursively call r.ParseBlocks with the padding
 		// value incremented.
 		if b.GetHasChildren() {
@@ -317,7 +299,7 @@ func (e *exporter) renderBlocks(pageID string, opts ...RenderOptions) ([]byte, e
 			if b.GetType() != "table" {
 				configCopy.depth += 1
 			}
-			_, err := e.renderBlocks(string(b.GetID()), configCopy)
+			_, err := e.renderFullPage(string(b.GetID()), "", configCopy)
 			if err != nil {
 				return e.page, err
 			}
@@ -325,6 +307,47 @@ func (e *exporter) renderBlocks(pageID string, opts ...RenderOptions) ([]byte, e
 	}
 
 	return e.page, nil
+}
+
+func (e *exporter) renderFullPage(pageID string, startCursor string, opts ...RenderOptions) ([]byte, error) {
+	config := resolveRenderConfig(opts...)
+
+	if config.originalPageRef == nil {
+		// Retrieve page object to pass to renderer in case render behavior depends
+		// on looking up metadata about the page.
+		page, err := e.c.Page.Get(context.Background(), na.PageID(pageID))
+		if err != nil {
+			return e.page, fmt.Errorf("failed to retrieve page from Notion. "+
+				"Error: %s.", err)
+		}
+		config.originalPageRef = page
+	}
+
+	// retrieve all blocks from Notion API for page. The max & default page size is 100
+	// (https://developers.notion.com/reference/pagination).
+	blocks, err := e.c.Block.GetChildren(context.Background(),
+		na.BlockID(pageID), &na.Pagination{
+			StartCursor: na.Cursor(startCursor),
+		})
+
+	if err != nil {
+		return e.page, fmt.Errorf("failed to retrieve data from Notion. "+
+			"Error: %s.", err)
+	}
+
+	_, err = e.renderBlocks(pageID, blocks, config)
+	if err != nil {
+		return e.page, err
+	}
+
+	if blocks.HasMore {
+		_, err := e.renderFullPage(pageID, blocks.NextCursor, config)
+		if err != nil {
+			return e.page, err
+		}
+	}
+
+	return e.page, err
 }
 
 // resolveNotionToken attempts to find a Notion integration token
